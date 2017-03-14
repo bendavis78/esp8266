@@ -1,9 +1,30 @@
 import utime as time
+script_start = time.ticks_ms()
+
 import ujson as json
 import usocket as socket
 import network
 import machine
 from machine import Pin
+
+sleep_when_done = False
+
+REQUEST_TIMEOUT = 5000
+
+
+def finish():
+    # To prevent sleeping, connect GPIO0 to GND via 10K resistor
+    pin = Pin(0, Pin.IN)
+    sleep = pin.value() == 1
+
+    print("Total runtime: {}ms".format(time.ticks_ms() - script_start))
+
+    if sleep:
+        print("Sleeping...")
+        machine.deepsleep()
+    else:
+        print("Staying awake.")
+
 
 def http_get(url):
     _, _, host_port, path = url.split('/', 3)
@@ -11,10 +32,23 @@ def http_get(url):
     addr = socket.getaddrinfo(host, int(port))[0][-1]
     s = socket.socket()
     s.connect(addr)
-    req = 'GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n' % (path, host)
+    req = 'GET /{} HTTP/1.0\r\nHost: {}\r\n\r\n'.format(path, host)
     print(req)
     s.send(bytes(req, 'utf8'))
+    start = time.ticks_ms()
+    timer = 0
+    response = bytes()
+    print('awaiting response...', end='')
+    while True:
+        print('.', end='')
+        data = s.recv(100)
+        if not data or timer > REQUEST_TIMEOUT:
+            break
+        timer = time.ticks_ms() - start
+        response += data
+    print('\n\n' + response.decode('utf8'))
     s.close()
+
 
 def run():
     # load config
@@ -62,15 +96,6 @@ def run():
 
 
 try:
-    # Hold GPIO2 low to keep board powered on via MOSFET
-    print("keeping power on...")
-    pin = Pin(2, Pin.OUT, value=0)
-    print("running...")
     run()
 finally:
-    # set GPIO2 high to switch off board via MOSFET
-    print("powering down...")
-    pin.high()
-    print("Sleeping...")
-    time.sleep(5)
-    machine.deepsleep()
+    finish()
